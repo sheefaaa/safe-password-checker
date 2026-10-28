@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safe Password Checker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white p-6 rounded-xl shadow w-full max-w-md">
+    <h1 class="text-xl font-bold mb-1">🔐 Safe Password Checker</h1>
+    <p class="text-xs text-gray-500 mb-3">
+      Your full password never leaves your browser.
+    </p>
+    <input id="pw" type="password" class="border w-full p-2 rounded mb-2"
+           placeholder="Type a password">
+    <label class="text-sm block mb-3">
+      <input type="checkbox" onchange="toggle(this)"> Show password
+    </label>
+    <button onclick="check()"
+            class="bg-blue-600 text-white w-full p-2 rounded">Check</button>
+    <div id="result" class="mt-4 text-sm"></div>
+  </div>
+<script>
+function toggle(cb) {
+  document.getElementById("pw").type = cb.checked ? "text" : "password";
+}
+
+async function sha1(text) {
+  const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)]
+    .map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function line(box, text, cls) {
+  const p = document.createElement("p");
+  p.className = cls || "";
+  p.textContent = text;
+  box.appendChild(p);
+}
+
+async function check() {
+  const pw = document.getElementById("pw").value;
+  const box = document.getElementById("result");
+  box.innerHTML = "";
+  if (!pw) return;
+
+  // 1. Strength
+  const z = zxcvbn(pw);
+  const labels = ["Very weak", "Weak", "Okay", "Good", "Strong"];
+  const colors = ["text-red-600", "text-red-600", "text-yellow-600",
+                  "text-green-600", "text-green-700"];
+  line(box, "Strength: " + labels[z.score], "font-bold " + colors[z.score]);
+  line(box, "Time to crack (slow hashing): " +
+       z.crack_times_display.offline_slow_hashing_1e4_per_second);
+  if (z.feedback.warning) line(box, "⚠️ " + z.feedback.warning);
+  z.feedback.suggestions.forEach(s => line(box, "💡 " + s));
+
+  // 2. Leak check (only first 5 chars of hash are sent)
+  try {
+    const hash = await sha1(pw);
+    const prefix = hash.slice(0, 5);
+    const suffix = hash.slice(5);
+    const res = await fetch("/range/" + prefix);
+    if (!res.ok) throw new Error("fail");
+    const text = await res.text();
+    let count = 0;
+    text.split("\n").forEach(l => {
+      const [s, c] = l.trim().split(":");
+      if (s === suffix) count = parseInt(c, 10);
+    });
+    if (count > 0) {
+      line(box, "🚨 Found in " + count.toLocaleString() +
+           " known data leaks. Do not use it.", "font-bold text-red-600 mt-2");
+    } else {
+      line(box, "✅ Not found in known leaks.", "font-bold text-green-600 mt-2");
+    }
+  } catch (e) {
+    line(box, "Leak check failed. Check your internet.", "text-red-600 mt-2");
+  }
+}
+</script>
+</body>
+</html>
